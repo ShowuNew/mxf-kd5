@@ -29,8 +29,15 @@ def git_push():
     except subprocess.CalledProcessError:
         pass  # 沒有新資料時 commit 會失敗，忽略
 
+# ── 判斷日盤/夜盤 ─────────────────────────────────────────
+def get_session():
+    """08:45~13:45 日盤(-F)，其餘夜盤(-M)"""
+    t = datetime.now().hour * 100 + datetime.now().minute
+    return "F" if 845 <= t <= 1345 else "M"
+
 # ── 抓即時報價 ───────────────────────────────────────────────
 def fetch_price():
+    session = get_session()
     try:
         r = requests.post(
             "https://mis.taifex.com.tw/futures/api/getQuoteDetail",
@@ -39,6 +46,8 @@ def fetch_price():
         )
         quotes = r.json().get("RtData", {}).get("QuoteList", [])
         for q in quotes:
+            if not q["SymbolID"].endswith(f"-{session}"):
+                continue
             if q.get("CTotalVolume", "0") not in ("", "0") and q.get("CLastPrice", ""):
                 return {
                     "symbol": q["SymbolID"],
@@ -87,11 +96,11 @@ def main():
     bars      = load_bars()
     cur_slot  = None
     cur_bar   = None
-    today     = datetime.today().strftime("%Y-%m-%d")
     last_push = datetime.now()
 
     while True:
         now   = datetime.now()
+        today = now.strftime("%Y-%m-%d")   # 每次更新，夜盤跨午夜也正確
         data  = fetch_price()
 
         if data is None:
@@ -153,7 +162,7 @@ def main():
 
         upper_wick = cur_bar["high"] - max(price, cur_bar["open"])
         alert = " *** SIGNAL ***" if K < 20 and has_lower else ""
-        print(f"{now.strftime('%H:%M:%S')}  {price:.0f}  K:{K:.1f}  D:{D:.1f}  下引:{lower_wick:.0f}pt  上引:{upper_wick:.0f}pt{alert}", flush=True)
+        print(f"{now.strftime('%H:%M:%S')} [{data['symbol']}]  {price:.0f}  K:{K:.1f}  D:{D:.1f}  下引:{lower_wick:.0f}pt  上引:{upper_wick:.0f}pt{alert}", flush=True)
 
         # 定時 git push
         if GIT_PUSH and (datetime.now() - last_push).seconds >= PUSH_EVERY * 60:
