@@ -151,18 +151,25 @@ def main():
         has_lower  = lower_wick > 10 and ratio >= 1.5   # 下引線 > 10點 且 >= 實體1.5倍
 
         # 顯示
+        kd_diff  = round(K - D, 1)
+        kd_bull  = K > D          # K > D（黃金交叉方向）
         n_bars = len(all_bars)
         signal = ""
-        if K < 20 and has_lower:
-            signal = f"  *** 進場訊號！K<20 + 下引線({lower_wick:.0f}pt/{ratio:.1f}x) ***"
+        if K < 20 and kd_bull and has_lower:
+            signal = f"  *** 強訊號！K<20 + K>D + 下引線({lower_wick:.0f}pt/{ratio:.1f}x) ***"
+        elif K < 20 and has_lower:
+            signal = f"  ** 進場訊號！K<20 + 下引線({lower_wick:.0f}pt/{ratio:.1f}x) **"
+        elif K < 20 and kd_bull:
+            signal = f"  < K<20 且 K>D，等下引線（下引{lower_wick:.0f}pt/{ratio:.1f}x）"
         elif K < 20:
-            signal = f"  << K<20 超賣，等下引線（目前下引{lower_wick:.0f}pt/{ratio:.1f}x）"
+            signal = f"  << K<20 超賣，K尚在D下，等翻轉（下引{lower_wick:.0f}pt）"
         elif K > 80:
             signal = "  >> K>80 超買注意"
 
         upper_wick = cur_bar["high"] - max(price, cur_bar["open"])
         alert = " *** SIGNAL ***" if K < 20 and has_lower else ""
-        print(f"{now.strftime('%H:%M:%S')} [{data['symbol']}]  {price:.0f}  K:{K:.1f}  D:{D:.1f}  下引:{lower_wick:.0f}pt  上引:{upper_wick:.0f}pt{alert}", flush=True)
+        kd_str = f"+{kd_diff}" if kd_diff >= 0 else str(kd_diff)
+        print(f"{now.strftime('%H:%M:%S')} [{data['symbol']}]  {price:.0f}  K:{K:.1f}  D:{D:.1f}  KD:{kd_str}  下引:{lower_wick:.0f}pt  上引:{upper_wick:.0f}pt{alert}", flush=True)
 
         # 定時 git push
         if GIT_PUSH and (datetime.now() - last_push).seconds >= PUSH_EVERY * 60:
