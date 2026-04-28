@@ -131,6 +131,11 @@ def main():
                     "D":     None,
                     "KD":    None,
                 }])
+                # 計算 K 和 D
+                temp_bars = pd.concat([bars, new_row], ignore_index=True)
+                K, D = calc_kd(temp_bars)
+                new_row["K"] = K
+                new_row["D"] = D
                 bars = pd.concat([bars, new_row], ignore_index=True)
                 K_s, D_s = calc_kd(bars)
                 bars.at[bars.index[-1], "K"]  = K_s
