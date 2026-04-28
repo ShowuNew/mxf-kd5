@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>5分鐘 KD Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0e1117; color: #e0e0e0; font-family: 'Consolas', monospace; font-size: 14px; padding: 16px; }
+  h2 { color: #7ecfff; margin-bottom: 12px; font-size: 16px; letter-spacing: 1px; }
+
+  /* Live card */
+  #live-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: center;
+  }
+  .live-label { color: #8b949e; font-size: 11px; margin-bottom: 2px; }
+  .live-value { font-size: 22px; font-weight: bold; color: #f0f6fc; }
+  .live-price { font-size: 30px; color: #3fb950; }
+  .signal-box {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    background: #21262d;
+    color: #8b949e;
+    border: 1px solid #30363d;
+  }
+  .signal-strong { background: #3d1f00; color: #ff9f45; border-color: #ff6b00; }
+  .signal-entry  { background: #0d2f1f; color: #3fb950; border-color: #238636; }
+  .signal-wait   { background: #1f2937; color: #7ecfff; border-color: #388bfd; }
+  .signal-os     { background: #1e1b30; color: #b69bf4; border-color: #8957e5; }
+  .signal-ob     { background: #2f1e1e; color: #f85149; border-color: #da3633; }
+
+  .kd-pos { color: #3fb950; }
+  .kd-neg { color: #f85149; }
+
+  /* Updated time */
+  #updated { color: #8b949e; font-size: 11px; margin-bottom: 16px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: #161b22;
+    color: #8b949e;
+    font-size: 11px;
+    text-align: right;
+    padding: 6px 10px;
+    border-bottom: 1px solid #30363d;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  thead th:first-child, thead th:nth-child(2) { text-align: left; }
+  tbody tr:hover { background: #161b22; }
+  tbody td {
+    padding: 5px 10px;
+    text-align: right;
+    border-bottom: 1px solid #21262d;
+    color: #c9d1d9;
+  }
+  tbody td:first-child, tbody td:nth-child(2) { text-align: left; color: #8b949e; }
+  .k-low  { color: #b69bf4; font-weight: bold; }
+  .k-high { color: #f85149; font-weight: bold; }
+  .kd-col-pos { color: #3fb950; }
+  .kd-col-neg { color: #f85149; }
+
+  #status { color: #8b949e; font-size: 12px; text-align: center; padding: 20px; }
+  #countdown { color: #8b949e; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<h2>⚡ 5分鐘 KD Dashboard</h2>
+
+<!-- Live section -->
+<div id="live-card">
+  <div>
+    <div class="live-label">商品</div>
+    <div class="live-value" id="l-symbol">—</div>
+  </div>
+  <div>
+    <div class="live-label">時間槽</div>
+    <div class="live-value" id="l-slot">—</div>
+  </div>
+  <div>
+    <div class="live-label">現價</div>
+    <div class="live-value live-price" id="l-price">—</div>
+  </div>
+  <div>
+    <div class="live-label">O / H / L</div>
+    <div class="live-value" style="font-size:15px" id="l-ohlc">—</div>
+  </div>
+  <div>
+    <div class="live-label">K</div>
+    <div class="live-value" id="l-k">—</div>
+  </div>
+  <div>
+    <div class="live-label">D</div>
+    <div class="live-value" id="l-d">—</div>
+  </div>
+  <div>
+    <div class="live-label">K−D</div>
+    <div class="live-value" id="l-kd">—</div>
+  </div>
+  <div>
+    <div class="live-label">下引 / 上引</div>
+    <div class="live-value" style="font-size:15px" id="l-wick">—</div>
+  </div>
+  <div id="l-signal" class="signal-box">—</div>
+</div>
+
+<div id="updated">更新時間：— &nbsp;|&nbsp; <span id="countdown"></span></div>
+
+<!-- History table -->
+<table>
+  <thead>
+    <tr>
+      <th>日期</th><th>時間</th>
+      <th>開</th><th>高</th><th>低</th><th>收</th>
+      <th>K</th><th>D</th><th>K−D</th>
+    </tr>
+  </thead>
+  <tbody id="tbody"></tbody>
+</table>
+<div id="status">載入中…</div>
+
+<script>
+const REFRESH = 15000;
+let countdown = REFRESH / 1000;
+let timer;
+
+function signalClass(sig) {
+  if (!sig) return '';
+  if (sig.includes('強訊號')) return 'signal-strong';
+  if (sig.includes('進場訊號')) return 'signal-entry';
+  if (sig.includes('等下引線')) return 'signal-wait';
+  if (sig.includes('超賣')) return 'signal-os';
+  if (sig.includes('超買')) return 'signal-ob';
+  return '';
+}
+
+async function loadLive() {
+  try {
+    const r = await fetch('kd5_live.json?_=' + Date.now());
+    if (!r.ok) return;
+    const d = await r.json();
+
+    document.getElementById('l-symbol').textContent = d.symbol ?? '—';
+    document.getElementById('l-slot').textContent   = d.slot ?? '—';
+    document.getElementById('l-price').textContent  = d.price != null ? d.price.toFixed(0) : '—';
+    document.getElementById('l-ohlc').textContent   =
+      `${d.open?.toFixed(0)} / ${d.high?.toFixed(0)} / ${d.low?.toFixed(0)}`;
+
+    const K = d.K, D = d.D, KD = d.KD;
+    const lk = document.getElementById('l-k');
+    lk.textContent = K != null ? K.toFixed(1) : '—';
+    lk.className = 'live-value' + (K < 20 ? ' k-low' : K > 80 ? ' k-high' : '');
+
+    document.getElementById('l-d').textContent = D != null ? D.toFixed(1) : '—';
+
+    const lkd = document.getElementById('l-kd');
+    if (KD != null) {
+      lkd.textContent = (KD >= 0 ? '+' : '') + KD.toFixed(2);
+      lkd.className = 'live-value ' + (KD >= 0 ? 'kd-pos' : 'kd-neg');
+    }
+
+    document.getElementById('l-wick').textContent =
+      `↓${d.lower_wick?.toFixed(0)}pt / ↑${d.upper_wick?.toFixed(0)}pt`;
+
+    const sig = d.signal ?? '';
+    const el = document.getElementById('l-signal');
+    el.textContent = sig || '無訊號';
+    el.className = 'signal-box ' + signalClass(sig);
+
+    document.getElementById('updated').innerHTML =
+      `更新時間：${d.updated} &nbsp;|&nbsp; <span id="countdown"></span>`;
+  } catch(e) {
+    document.getElementById('l-signal').textContent = '無法讀取 kd5_live.json';
+  }
+}
+
+async function loadCSV() {
+  try {
+    const r = await fetch('kd5_data.csv?_=' + Date.now());
+    if (!r.ok) { document.getElementById('status').textContent = '找不到 kd5_data.csv'; return; }
+    const text = await r.text();
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) { document.getElementById('status').textContent = '尚無歷史資料'; return; }
+
+    const headers = lines[0].split(',');
+    const idxK  = headers.indexOf('K');
+    const idxD  = headers.indexOf('D');
+    const idxKD = headers.indexOf('KD');
+
+    // reverse: newest first
+    const rows = lines.slice(1).reverse();
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+
+    rows.forEach(line => {
+      if (!line.trim()) return;
+      const c = line.split(',');
+      const K  = idxK  >= 0 ? parseFloat(c[idxK])  : NaN;
+      const D  = idxD  >= 0 ? parseFloat(c[idxD])  : NaN;
+      const KD = idxKD >= 0 ? parseFloat(c[idxKD]) : NaN;
+
+      const tr = document.createElement('tr');
+      const kClass = isNaN(K) ? '' : (K < 20 ? 'k-low' : K > 80 ? 'k-high' : '');
+      const kdClass = isNaN(KD) ? '' : (KD >= 0 ? 'kd-col-pos' : 'kd-col-neg');
+      const kdStr  = isNaN(KD) ? '—' : (KD >= 0 ? '+' : '') + KD.toFixed(2);
+
+      tr.innerHTML = `
+        <td>${c[0] ?? '—'}</td>
+        <td>${c[1] ?? '—'}</td>
+        <td>${parseFloat(c[2])?.toFixed(0) ?? '—'}</td>
+        <td>${parseFloat(c[3])?.toFixed(0) ?? '—'}</td>
+        <td>${parseFloat(c[4])?.toFixed(0) ?? '—'}</td>
+        <td>${parseFloat(c[5])?.toFixed(0) ?? '—'}</td>
+        <td class="${kClass}">${isNaN(K)  ? '—' : K.toFixed(1)}</td>
+        <td>${isNaN(D)  ? '—' : D.toFixed(1)}</td>
+        <td class="${kdClass}">${kdStr}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('status').textContent = '';
+  } catch(e) {
+    document.getElementById('status').textContent = '讀取 CSV 失敗：' + e.message;
+  }
+}
+
+function startCountdown() {
+  clearInterval(timer);
+  countdown = REFRESH / 1000;
+  timer = setInterval(() => {
+    countdown--;
+    const el = document.getElementById('countdown');
+    if (el) el.textContent = `${countdown}s 後更新`;
+    if (countdown <= 0) clearInterval(timer);
+  }, 1000);
+}
+
+async function refresh() {
+  await Promise.all([loadLive(), loadCSV()]);
+  startCountdown();
+}
+
+refresh();
+setInterval(refresh, REFRESH);
+</script>
+</body>
+</html>

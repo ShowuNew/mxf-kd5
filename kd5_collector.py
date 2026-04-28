@@ -8,10 +8,12 @@ import requests
 import pandas as pd
 import time
 import os
+import json
 import subprocess
 from datetime import datetime
 
 CSV_FILE    = "kd5_data.csv"
+LIVE_FILE   = "kd5_live.json"
 SYMBOL_IDS  = ["MXFE6-F", "MXFE6-M", "MXFF6-F", "MXFF6-M"]  # 日盤-F 夜盤-M
 KD_PERIOD   = 9
 BAR_MIN     = 5                          # 幾分鐘一根
@@ -71,9 +73,12 @@ def bar_slot(time_str):
 def load_bars():
     if os.path.exists(CSV_FILE):
         df = pd.read_csv(CSV_FILE)
+        for col in ["K", "D", "KD"]:
+            if col not in df.columns:
+                df[col] = None
         print(f"  Loaded {len(df)} bars from {CSV_FILE}")
         return df
-    return pd.DataFrame(columns=["date","time","open","high","low","close"])
+    return pd.DataFrame(columns=["date","time","open","high","low","close","K","D","KD"])
 
 # ── 計算 KD ──────────────────────────────────────────────────
 def calc_kd(df, period=KD_PERIOD):
@@ -122,8 +127,15 @@ def main():
                     "high":  cur_bar["high"],
                     "low":   cur_bar["low"],
                     "close": cur_bar["close"],
+                    "K":     None,
+                    "D":     None,
+                    "KD":    None,
                 }])
                 bars = pd.concat([bars, new_row], ignore_index=True)
+                K_s, D_s = calc_kd(bars)
+                bars.at[bars.index[-1], "K"]  = K_s
+                bars.at[bars.index[-1], "D"]  = D_s
+                bars.at[bars.index[-1], "KD"] = round(K_s - D_s, 2)
                 bars.to_csv(CSV_FILE, index=False)
 
             # 開新 K 棒
@@ -170,6 +182,26 @@ def main():
         alert = " *** SIGNAL ***" if K < 20 and has_lower else ""
         kd_str = f"+{kd_diff}" if kd_diff >= 0 else str(kd_diff)
         print(f"{now.strftime('%H:%M:%S')} [{data['symbol']}]  {price:.0f}  K:{K:.1f}  D:{D:.1f}  KD:{kd_str}  下引:{lower_wick:.0f}pt  上引:{upper_wick:.0f}pt{alert}", flush=True)
+
+        # 寫即時狀態 JSON
+        live = {
+            "updated":     now.strftime("%Y-%m-%d %H:%M:%S"),
+            "symbol":      data["symbol"],
+            "slot":        cur_slot,
+            "price":       price,
+            "open":        cur_bar["open"],
+            "high":        cur_bar["high"],
+            "low":         cur_bar["low"],
+            "close":       cur_bar["close"],
+            "K":           K,
+            "D":           D,
+            "KD":          round(K - D, 2),
+            "lower_wick":  round(lower_wick, 1),
+            "upper_wick":  round(upper_wick, 1),
+            "signal":      signal.strip(),
+        }
+        with open(LIVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(live, f, ensure_ascii=False)
 
         # 定時 git push
         if GIT_PUSH and (datetime.now() - last_push).seconds >= PUSH_EVERY * 60:
